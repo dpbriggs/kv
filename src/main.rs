@@ -2,7 +2,7 @@ extern crate clap;
 extern crate dirs;
 extern crate serde_json;
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, AppSettings, Arg, SubCommand};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -80,9 +80,34 @@ fn main() {
         .version("0.1")
         .author("David B")
         .about("Simple key, value storage")
+        .setting(AppSettings::SubcommandRequiredElseHelp)
+        .about("Get key from storage")
+        .help(
+            r#"Please supply an action! {get, set, del}
+
+kv is your CLI dictionary. set, get, and del keys.
+
+Example:
+~> kv set my-key my-keys-value
+~> kv get my-key
+my-keys-value
+~> kv del my-key
+"#,
+        )
         .subcommand(
             SubCommand::with_name("get")
                 .about("Get key from storage")
+                .help(
+                    r#"kv get <key>
+
+Get the value of <key> from storage
+
+Example:
+~> kv set my-key my-keys-value
+~> kv get my-key
+my-keys-value
+"#,
+                )
                 .arg(
                     Arg::with_name("key")
                         .help("key to get from storage")
@@ -92,10 +117,23 @@ fn main() {
         )
         .subcommand(
             SubCommand::with_name("del")
+                .help(
+                    r#"kv del <key>
+
+Delete <key> in storage (and its value)
+
+Example:
+~> kv set my-key my-keys-value
+~> kv del my-key
+~> kv get my-key
+
+~>
+"#,
+                )
                 .about("Delete key and value from storage")
                 .arg(
                     Arg::with_name("key")
-                        .help("key to del from storage")
+                        .help("key to delete from storage")
                         .takes_value(true)
                         .required(true),
                 ),
@@ -103,6 +141,17 @@ fn main() {
         .subcommand(
             SubCommand::with_name("set")
                 .about("set key to value in storage")
+                .help(
+                    r#"kv set <key> <val>
+
+Set <key> to <val> in storage.
+
+Example:
+~> kv set my-key my-keys-value
+~> kv get my-key
+my-keys-value
+"#,
+                )
                 .arg(
                     Arg::with_name("key")
                         .help("key to set in storage")
@@ -111,7 +160,7 @@ fn main() {
                 )
                 .arg(
                     Arg::with_name("val")
-                        .help("key to set in storage")
+                        .help("<val> you wish to set <key> to.")
                         .takes_value(true)
                         .required(true),
                 ),
