@@ -8,6 +8,7 @@ use clap::{App, AppSettings, Arg, SubCommand};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
+use std::fmt;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -36,6 +37,17 @@ struct KVStore {
     kvs: KV,
     cmds: KV,
     hooks: Vec<Hook>,
+}
+
+impl fmt::Display for OpType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let str_rep = match *self {
+            OpType::Get => "get",
+            OpType::Set => "set",
+            OpType::Del => "del",
+        };
+        write!(f, "{}", str_rep)
+    }
 }
 
 impl FromStr for OpType {
@@ -199,6 +211,12 @@ fn main() {
         .about("Simple key, value storage")
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .about("Key-Value Storage with bash command hooks. Run hooks after setting keys, etc.")
+        .subcommand(SubCommand::with_name("list")
+                    .about("List keys, cmds, or hooks.")
+                    .arg(Arg::with_name("to-list")
+                         .takes_value(true)
+                         .required(true)
+                    .possible_values(&["keys", "cmds", "hooks"])))
         .subcommand(
             SubCommand::with_name("cmd")
                 .setting(AppSettings::SubcommandRequiredElseHelp)
@@ -321,6 +339,34 @@ my-key-value
         print_res(value);
         run_hooks(key, &OpType::Del);
     }
+    if let Some(to_list) = matches.subcommand_matches("list") {
+        let key = to_list.value_of("to-list").unwrap();
+        let kvstore = get_store();
+        match key {
+            "cmds" => {
+                for (key, val) in kvstore.cmds.iter() {
+                    println!("{} -- {}", key, val);
+                }
+            }
+            "keys" => {
+                println!("Key -- Value");
+                for (key, val) in kvstore.kvs.iter() {
+                    println!("{} -- {}", key, val);
+                }
+            }
+            "hooks" => {
+                println!("Hook Name -- Cmd Name -- Trigger -- Key");
+                for hook in kvstore.hooks {
+                    println!(
+                        "{} -- {} -- {} -- {}",
+                        hook.name, hook.cmd_name, hook.run_on, hook.key
+                    );
+                }
+            }
+            _ => print_err("Error! Unknown subject to list!"),
+        }
+    }
+
     if let Some(cmd) = matches.subcommand_matches("cmd") {
         if let Some(m_run) = cmd.subcommand_matches("run") {
             let cmd_name = m_run.value_of("cmd-name").unwrap();
