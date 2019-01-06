@@ -1,13 +1,13 @@
-#+TITLE: KV the simple CLI key-value storage, with hooks.
+#+TITLE: KV: The simple CLI key-value storage, with hooks.
 #+AUTHOR: dpbriggs
 #+EMAIL: email@dpbriggs.ca
 
-* KV
+* The KV CLI tool
 
 Easy CLI key-value storage with bash hooks. Use kv to auto-configure your system on key-value updates.
 All material is stored in a simple JSON file. Written in rust to learn the language.
 
-#+BEGIN_SRC bash
+#+BEGIN_EXAMPLE
 ➜  kv git:(master) kv --help
 kv 0.2
 David Briggs (dpbriggs@edu.uwaterloo.ca)
@@ -27,7 +27,7 @@ SUBCOMMANDS:
     help    Prints this message or the help of the given subcommand(s)
     list    List keys, cmds, or hooks.
     set     set key to value in storage
-#+END_SRC
+#+END_EXAMPLE
 
 ** Example
 I currently use it to help manage i3 configuration changes. Below is an example of using kv to update your desktop background.
@@ -49,7 +49,7 @@ Steps:
 ** Install
 
 To install, first clone the project:
-: git clone <repo-url>
+: git clone git@github.com:dpbriggs/kv.git
 
 Then install it with cargo:
 : cargo install --force --path kv
@@ -91,6 +91,8 @@ ln -s ~/backup/kv.json ~/.config/kv/kv.json
 
 Simply set keys to values, get the values for a key, and delete keys and values.
 
+For usage, either you can just put =--help= or =-h= at the end of any statement.
+
 #+BEGIN_EXAMPLE
 USAGE:
     kv set <key> <val>  -- sets <key> to <val>
@@ -124,7 +126,7 @@ Example:
 #+BEGIN_EXAMPLE
 ➜  ~ kv cmd add my-cmd 'echo hi'
 ➜  ~ kv cmd run my-cmd
-hi                                                                                                                                                             
+hi
 #+END_EXAMPLE
 
 *** Hooks
