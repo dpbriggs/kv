@@ -1,0 +1,149 @@
+#+TITLE: KV the simple CLI key-value storage, with hooks.
+#+AUTHOR: dpbriggs
+#+EMAIL: email@dpbriggs.ca
+
+* KV
+
+Easy CLI key-value storage with bash hooks. Use kv to auto-configure your system on key-value updates.
+All material is stored in a simple JSON file. Written in rust to learn the language.
+
+#+BEGIN_SRC bash
+➜  kv git:(master) kv --help
+kv 0.2
+David Briggs (dpbriggs@edu.uwaterloo.ca)
+Key-Value Storage with bash command hooks. Add hooks to run commands on variable update.
+
+USAGE:
+    kv <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    cmd     Add, and Run bash commands. Add hooks to run commands on variable update.
+    del     Delete key and value from storage
+    get     Get key from storage
+    help    Prints this message or the help of the given subcommand(s)
+    list    List keys, cmds, or hooks.
+    set     set key to value in storage
+#+END_SRC
+
+** Example
+I currently use it to help manage i3 configuration changes. Below is an example of using kv to update your desktop background.
+
+Steps:
+1. Setup a command which will grab the image from the value of =background-img-loc=
+2. Add a hook to run the command above when =background-img-loc= is set to a new value
+3. Set the value of =background-img-loc=, which triggers the hook, which runs the bash command to update the background.
+
+#+BEGIN_SRC bash
+ ➜  ~ kv cmd add update-bg-cmd 'feh --bg-scale $(kv get background-img-loc)'
+ ➜  ~ kv cmd add-hook update-bg-hook update-bg-cmd background-img-loc
+ ➜  ~ kv set background-img-loc ~/Pictures/bg1.png
+*background is updated to ~/Pictures/bg1.png*
+ ➜  ~ kv set background-img-loc ~/Pictures/bg2.png
+*background is updated to ~/Pictures/bg2..png*
+#+END_SRC
+
+** Install
+
+To install, first clone the project:
+: git clone <repo-url>
+
+Then install it with cargo:
+: cargo install --force --path kv
+
+If you haven't already, you will need to add the the =$HOME/.cargo/bin= folder to your path. Simply copy the below into =.profile= or =.bashrc= or =.zshrc=:
+
+: export PATH="$PATH:$HOME/.cargo/bin"
+
+And verify it's installed:
+
+#+BEGIN_EXAMPLE
+➜  ~ kv          
+kv 0.2
+David Briggs (dpbriggs@edu.uwaterloo.ca)
+Key-Value Storage with bash command hooks. Add hooks to run commands on variable update.
+...truncated...
+#+END_EXAMPLE
+
+** Usage
+
+*** Storage file
+
+By default kv uses the following path:
+
+: $CONFIG_DIR/kv/kv.json
+
+On linux this is usually:
+
+: ~/.config/kv/kv.json
+
+I usually make a =kv.json= in my backup folder, and make a symlink for that file:
+
+#+BEGIN_EXAMPLE
+mkdir -p ~/.config/kv
+ln -s ~/backup/kv.json ~/.config/kv/kv.json
+#+END_EXAMPLE
+
+*** Key-Value storage
+
+Simply set keys to values, get the values for a key, and delete keys and values.
+
+#+BEGIN_EXAMPLE
+USAGE:
+    kv set <key> <val>  -- sets <key> to <val>
+    kv get <key>        -- prints value of <key> to stdout. Newline on missing key.
+    kv del <key>        -- deletes <key> and returns it value to stdout.
+#+END_EXAMPLE
+
+Here's an example:
+
+#+BEGIN_SRC bash
+➜  ~ kv set hi david
+➜  ~ kv get hi      
+david
+➜  ~ kv del hi      
+david
+➜  ~ kv get hi      
+#+END_SRC
+
+*** Commands
+
+Commands are a key-value storage for bash commands. You can run them directly with =kv cmd run=.
+
+#+BEGIN_SRC bash
+USAGE:
+    kv cmd add <cmd-name> <cmd-value>
+    kv cmd run <cmd-name>
+#+END_SRC
+
+Example:
+
+#+BEGIN_EXAMPLE
+➜  ~ kv cmd add my-cmd 'echo hi'
+➜  ~ kv cmd run my-cmd
+hi                                                                                                                                                             
+#+END_EXAMPLE
+
+*** Hooks
+
+Hooks are used to run Commands when Keys are updated (set, get, or del).
+
+#+BEGIN_EXAMPLE
+USAGE
+    kv cmd add-hook <hook-name> <cmd-name> <trigger> <key>
+    kv cmd del-hook <hook-name>
+#+END_EXAMPLE
+
+Example (same as the i3 one):
+
+#+BEGIN_SRC bash
+ ➜  ~ kv cmd add update-bg-cmd 'feh --bg-scale $(kv get background-img-loc)'
+ ➜  ~ kv cmd add-hook update-bg-hook update-bg-cmd background-img-loc
+ ➜  ~ kv set background-img-loc ~/Pictures/bg1.png
+*background is updated to ~/Pictures/bg1.png*
+ ➜  ~ kv set background-img-loc ~/Pictures/bg2.png
+*background is updated to ~/Pictures/bg2..png*
+#+END_SRC
