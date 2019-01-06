@@ -208,9 +208,9 @@ fn main() {
     let matches = App::new("kv")
         .version("0.2")
         .author("David Briggs (dpbriggs@edu.uwaterloo.ca)")
-        .about("Simple key, value storage")
+        .about("Simple key, value storage with hooks.")
         .setting(AppSettings::SubcommandRequiredElseHelp)
-        .about("Key-Value Storage with bash command hooks. Run hooks after setting keys, etc.")
+        .about("Key-Value Storage with bash command hooks. Add hooks to run commands on variable update.")
         .subcommand(SubCommand::with_name("list")
                     .about("List keys, cmds, or hooks.")
                     .arg(Arg::with_name("to-list")
@@ -220,7 +220,7 @@ fn main() {
         .subcommand(
             SubCommand::with_name("cmd")
                 .setting(AppSettings::SubcommandRequiredElseHelp)
-                .about("Add, and Run bash commands. Add hooks to run them on variable update.")
+                .about("Add, and Run bash commands. Add hooks to run commands on variable update.")
                 .subcommand(
                     SubCommand::with_name("run")
                         .about("Run commands <cmd-name>")
