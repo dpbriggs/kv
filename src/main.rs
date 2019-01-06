@@ -16,14 +16,14 @@ use std::str::FromStr;
 
 type KV = HashMap<String, String>;
 
-#[derive(Serialize, Deserialize, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
 enum OpType {
     Get,
     Set,
     Del,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 struct Hook {
     name: String,
     cmd_name: String,
@@ -74,30 +74,31 @@ fn write_file(m: &KVStore) {
     file.write_all(s.as_bytes()).unwrap();
 }
 
-fn run_command(cmd_name: &String, cmd: &String) {
+fn run_command(cmd_name: &str, cmd: &str) {
     let shell = match env::var("SHELL") {
         Ok(s) => s,
         Err(_) => "bash".to_owned(),
     };
     if let Err(e) = Command::new(shell).arg("-c").arg(&cmd).spawn() {
-        println!(
-            "Failed to run '{}' with error:\n {:?}",
+        let err_msg = format!(
+            "Error! Failed to run '{}' with error:\n {:?}",
             cmd_name,
             e.description()
-        )
+        );
+        print_err(&err_msg[..]);
     }
 }
 
-fn run_hooks(key_name: &str, current_op: OpType) {
+fn run_hooks(key_name: &str, current_op: &OpType) {
     let kvstore = get_store();
     let hooks_to_run = kvstore
         .hooks
         .iter()
-        .filter(|&x| x.run_on == current_op && x.key == key_name.to_owned());
+        .filter(|&x| x.run_on == *current_op && x.key == key_name);
     for hook in hooks_to_run {
         match get_key(&hook.cmd_name[..], &kvstore.cmds) {
             Some(cmd) => run_command(&hook.cmd_name, &cmd),
-            None => println!("Bad hook! Hook {:?} has no cmd!", hook.name),
+            None => println!("Error! Bad hook! Hook {:?} has no cmd!", hook.name),
         }
     }
 }
@@ -109,14 +110,36 @@ fn get_store() -> KVStore {
     }
 }
 
+fn rm_hook(name: &str) {
+    let mut kvstore = get_store();
+    match kvstore.hooks.iter().position(|x| x.name == name) {
+        Some(pos) => {
+            kvstore.hooks.remove(pos);
+        }
+        None => {
+            let err_msg = format!("Error! Hook {} does not exist!", name);
+            print_err(&err_msg[..]);
+        }
+    }
+    write_file(&kvstore);
+}
+
 fn add_hook(name: String, cmd_name: String, run_on: OpType, key: String) {
+    let mut kvstore = get_store();
+    if kvstore.hooks.iter().filter(|&x| x.name == name).count() > 0 {
+        let err_msg = format!(
+            "Error! {} already exists. To delete it try\n kv cmd del-hook {}",
+            name, name
+        );
+        print_err(&err_msg[..]);
+    }
     let new_hook = Hook {
         name,
         cmd_name,
         run_on,
         key,
     };
-    let mut kvstore = get_store();
+
     kvstore.hooks.push(new_hook);
     write_file(&kvstore)
 }
@@ -174,7 +197,12 @@ fn main() {
                     .arg(Arg::with_name("cmd-name").takes_value(true).required(true))
                     .arg(Arg::with_name("trigger").takes_value(false).required(true).possible_values(&["get", "set", "del"]))
                     .arg(Arg::with_name("key").takes_value(true).required(true))
-            ),
+            )
+            .subcommand(
+                SubCommand::with_name("del-hook")
+                    .about("Remove hook with name <hook-name>")
+                    .arg(Arg::with_name("hook-name").takes_value(true).required(true))
+            )
         )
         .subcommand(
             SubCommand::with_name("get")
@@ -253,29 +281,29 @@ my-key-value
         let key = get.value_of("key").unwrap();
         let value = get_key(key, &kvstore.kvs);
         print_res(value);
-        run_hooks(key, OpType::Get);
+        run_hooks(key, &OpType::Get);
     }
     if let Some(set) = matches.subcommand_matches("set") {
         let key = set.value_of("key").unwrap();
         let value = set.value_of("val").unwrap();
         set_key(key, value, &mut kvstore.kvs);
         write_file(&kvstore);
-        run_hooks(key, OpType::Set);
+        run_hooks(key, &OpType::Set);
     }
     if let Some(del) = matches.subcommand_matches("del") {
         let key = del.value_of("key").unwrap();
         let value = del_key(key, &mut kvstore.kvs);
         write_file(&kvstore);
         print_res(value);
-        run_hooks(key, OpType::Del);
+        run_hooks(key, &OpType::Del);
     }
     if let Some(cmd) = matches.subcommand_matches("cmd") {
         if let Some(m_run) = cmd.subcommand_matches("run") {
             let cmd_name = m_run.value_of("cmd-name").unwrap();
             let cmd_value = get_key(cmd_name, &kvstore.cmds);
             match cmd_value {
-                Some(v) => run_command(&cmd_name.to_owned(), &v.to_owned()),
-                None => println!("Command {} does not exist!", cmd_name),
+                Some(v) => run_command(cmd_name, &v),
+                None => println!("Error! Command {} does not exist!", cmd_name),
             }
         }
         if let Some(m_add) = cmd.subcommand_matches("add") {
@@ -284,6 +312,11 @@ my-key-value
             set_key(cmd_name, cmd_value, &mut kvstore.cmds);
             write_file(&kvstore);
         }
+        if let Some(m_del_hook) = cmd.subcommand_matches("del-hook") {
+            let hook_name = m_del_hook.value_of("hook-name").unwrap();
+            rm_hook(hook_name);
+        }
+
         if let Some(m_add_hook) = cmd.subcommand_matches("add-hook") {
             let hook_name = m_add_hook.value_of("hook-name").unwrap();
             let cmd_name = m_add_hook.value_of("cmd-name").unwrap();
