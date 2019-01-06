@@ -194,8 +194,8 @@ fn print_err(s: &str) -> ! {
 /// Fooar
 fn main() {
     let matches = App::new("kv")
-        .version("0.1")
-        .author("David B")
+        .version("0.2")
+        .author("David Briggs (dpbriggs@edu.uwaterloo.ca)")
         .about("Simple key, value storage")
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .about("Key-Value Storage with bash command hooks. Run hooks after setting keys, etc.")
