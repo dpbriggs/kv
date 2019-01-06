@@ -1,15 +1,54 @@
+#[macro_use]
 extern crate clap;
 extern crate dirs;
 extern crate serde_json;
-
+#[macro_use]
+extern crate serde_derive;
 use clap::{App, AppSettings, Arg, SubCommand};
 use std::collections::HashMap;
+use std::env;
+use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-// const FILE_LOC: &str = "/home/david/test.json";
+use std::process::Command;
+use std::str::FromStr;
 
-type KVStore = HashMap<String, String>;
+type KV = HashMap<String, String>;
+
+#[derive(Serialize, Deserialize, PartialEq)]
+enum OpType {
+    Get,
+    Set,
+    Del,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Hook {
+    name: String,
+    cmd_name: String,
+    run_on: OpType,
+    key: String,
+}
+
+#[derive(Serialize, Deserialize, Default)]
+struct KVStore {
+    kvs: KV,
+    cmds: KV,
+    hooks: Vec<Hook>,
+}
+
+impl FromStr for OpType {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "get" => Ok(OpType::Get),
+            "set" => Ok(OpType::Set),
+            "del" => Ok(OpType::Del),
+            _ => Err("No match found!"),
+        }
+    }
+}
 
 fn get_file_loc() -> PathBuf {
     match dirs::home_dir() {
@@ -28,38 +67,70 @@ fn get_file() -> std::fs::File {
         .unwrap()
 }
 
-fn write_kv_file(m: &KVStore) {
+fn write_file(m: &KVStore) {
     let mut file = get_file();
     file.set_len(0).unwrap();
     let s = serde_json::to_string_pretty(m).unwrap();
     file.write_all(s.as_bytes()).unwrap();
 }
 
-fn get_kv_store() -> KVStore {
-    match serde_json::from_reader(get_file()) {
+fn run_command(cmd_name: &String, cmd: &String) {
+    let shell = match env::var("SHELL") {
         Ok(s) => s,
-        Err(_) => HashMap::new(),
+        Err(_) => "bash".to_owned(),
+    };
+    if let Err(e) = Command::new(shell).arg("-c").arg(&cmd).spawn() {
+        println!(
+            "Failed to run '{}' with error:\n {:?}",
+            cmd_name,
+            e.description()
+        )
     }
 }
 
-fn get_key(s: &str) -> Option<String> {
-    let map: KVStore = serde_json::from_reader(get_file()).expect("Bad json file!");
+fn run_hooks(key_name: &str, current_op: OpType) {
+    let kvstore = get_store();
+    let hooks_to_run = kvstore
+        .hooks
+        .iter()
+        .filter(|&x| x.run_on == current_op && x.key == key_name.to_owned());
+    for hook in hooks_to_run {
+        match get_key(&hook.cmd_name[..], &kvstore.cmds) {
+            Some(cmd) => run_command(&hook.cmd_name, &cmd),
+            None => println!("Bad hook! Hook {:?} has no cmd!", hook.name),
+        }
+    }
+}
+
+fn get_store() -> KVStore {
+    match serde_json::from_reader(get_file()) {
+        Ok(s) => s,
+        Err(_) => Default::default(),
+    }
+}
+
+fn add_hook(name: String, cmd_name: String, run_on: OpType, key: String) {
+    let new_hook = Hook {
+        name,
+        cmd_name,
+        run_on,
+        key,
+    };
+    let mut kvstore = get_store();
+    kvstore.hooks.push(new_hook);
+    write_file(&kvstore)
+}
+
+fn get_key(s: &str, map: &KV) -> Option<String> {
     map.get(&s.to_owned()).cloned()
 }
 
-fn set_key(k: &str, v: &str) -> Option<String> {
-    let mut map = get_kv_store();
+fn set_key(k: &str, v: &str, map: &mut KV) {
     map.insert(k.to_owned(), v.to_owned());
-    write_kv_file(&map);
-    Some("".to_owned())
 }
 
-fn del_key(k: &str) -> Option<String> {
-    let mut map = get_kv_store();
-    // map.insert("3".to_owned(), "4".to_owned());
-    map.remove(&k.to_owned());
-    write_kv_file(&map);
-    Some("".to_owned())
+fn del_key(k: &str, map: &mut KV) -> Option<String> {
+    map.remove(&k.to_owned())
 }
 
 fn print_res(s: Option<String>) {
@@ -82,17 +153,28 @@ fn main() {
         .about("Simple key, value storage")
         .setting(AppSettings::SubcommandRequiredElseHelp)
         .about("Get key from storage")
-        .help(
-            r#"Please supply an action! {get, set, del}
-
-kv is your CLI dictionary. set, get, and del keys.
-
-Example:
-~> kv set my-key my-keys-value
-~> kv get my-key
-my-keys-value
-~> kv del my-key
-"#,
+        .subcommand(
+            SubCommand::with_name("cmd")
+                .about("Add, Run, and hook commands")
+                .subcommand(
+                    SubCommand::with_name("run")
+                        .about("Run commands <cmd-name>")
+                        .arg(Arg::with_name("cmd-name").takes_value(true).required(true)),
+                )
+                .subcommand(
+                    SubCommand::with_name("add")
+                        .about("Add command with name <cmd-name>, and value <cmd-value>")
+                        .arg(Arg::with_name("cmd-name").takes_value(true).required(true))
+                        .arg(Arg::with_name("cmd-value").takes_value(true).required(true)),
+                )
+            .subcommand(
+                SubCommand::with_name("add-hook")
+                    .about("Add hook with name <hook-name> to run <cmd-name> when [key] are --<trigger>=<get,set,del>")
+                    .arg(Arg::with_name("hook-name").takes_value(true).required(true))
+                    .arg(Arg::with_name("cmd-name").takes_value(true).required(true))
+                    .arg(Arg::with_name("trigger").takes_value(false).required(true).possible_values(&["get", "set", "del"]))
+                    .arg(Arg::with_name("key").takes_value(true).required(true))
+            ),
         )
         .subcommand(
             SubCommand::with_name("get")
@@ -103,9 +185,9 @@ my-keys-value
 Get the value of <key> from storage
 
 Example:
-~> kv set my-key my-keys-value
+~> kv set my-key my-key-value
 ~> kv get my-key
-my-keys-value
+my-key-value
 "#,
                 )
                 .arg(
@@ -123,7 +205,7 @@ my-keys-value
 Delete <key> in storage (and its value)
 
 Example:
-~> kv set my-key my-keys-value
+~> kv set my-key my-key-value
 ~> kv del my-key
 ~> kv get my-key
 
@@ -147,9 +229,9 @@ Example:
 Set <key> to <val> in storage.
 
 Example:
-~> kv set my-key my-keys-value
+~> kv set my-key my-key-value
 ~> kv get my-key
-my-keys-value
+my-key-value
 "#,
                 )
                 .arg(
@@ -166,19 +248,53 @@ my-keys-value
                 ),
         )
         .get_matches();
+    let mut kvstore = get_store();
     if let Some(get) = matches.subcommand_matches("get") {
         let key = get.value_of("key").unwrap();
-        let value = get_key(key);
+        let value = get_key(key, &kvstore.kvs);
         print_res(value);
+        run_hooks(key, OpType::Get);
     }
     if let Some(set) = matches.subcommand_matches("set") {
         let key = set.value_of("key").unwrap();
         let value = set.value_of("val").unwrap();
-        set_key(key, value);
+        set_key(key, value, &mut kvstore.kvs);
+        write_file(&kvstore);
+        run_hooks(key, OpType::Set);
     }
     if let Some(del) = matches.subcommand_matches("del") {
         let key = del.value_of("key").unwrap();
-        let value = del_key(key);
+        let value = del_key(key, &mut kvstore.kvs);
+        write_file(&kvstore);
         print_res(value);
+        run_hooks(key, OpType::Del);
+    }
+    if let Some(cmd) = matches.subcommand_matches("cmd") {
+        if let Some(m_run) = cmd.subcommand_matches("run") {
+            let cmd_name = m_run.value_of("cmd-name").unwrap();
+            let cmd_value = get_key(cmd_name, &kvstore.cmds);
+            match cmd_value {
+                Some(v) => run_command(&cmd_name.to_owned(), &v.to_owned()),
+                None => println!("Command {} does not exist!", cmd_name),
+            }
+        }
+        if let Some(m_add) = cmd.subcommand_matches("add") {
+            let cmd_name = m_add.value_of("cmd-name").unwrap();
+            let cmd_value = m_add.value_of("cmd-value").unwrap();
+            set_key(cmd_name, cmd_value, &mut kvstore.cmds);
+            write_file(&kvstore);
+        }
+        if let Some(m_add_hook) = cmd.subcommand_matches("add-hook") {
+            let hook_name = m_add_hook.value_of("hook-name").unwrap();
+            let cmd_name = m_add_hook.value_of("cmd-name").unwrap();
+            let trigger_op = value_t!(m_add_hook, "trigger", OpType).unwrap();
+            let key = m_add_hook.value_of("key").unwrap();
+            add_hook(
+                hook_name.to_owned(),
+                cmd_name.to_owned(),
+                trigger_op,
+                key.to_owned(),
+            )
+        }
     }
 }

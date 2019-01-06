@@ -5,7 +5,8 @@ authors = ["david"]
 edition = "2018"
 
 [dependencies]
-serde = "1.0"
+serde = "0.8"
+serde_derive = "0.8"
 serde_json = "0.8"
 dirs = "1.0.4"
 clap = "2.32.0"
