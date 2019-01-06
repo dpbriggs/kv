@@ -51,9 +51,32 @@ impl FromStr for OpType {
 }
 
 fn get_file_loc() -> PathBuf {
-    match dirs::home_dir() {
-        Some(home) => Path::new(&home).join("test.json"),
-        None => print_err(&"Cannot find the user's home!".to_owned()),
+    match dirs::config_dir() {
+        Some(home) => {
+            let store_file_dir_path = Path::new(&home).join("kv");
+            if !store_file_dir_path.exists() {
+                match std::fs::create_dir_all(&store_file_dir_path) {
+                    Ok(_) => {
+                        println!(
+                            "Created config dir path {}",
+                            store_file_dir_path.to_string_lossy()
+                        );
+                    }
+                    Err(e) => {
+                        let err_msg = format!(
+                            "Error! Cannot create path {}, error {}",
+                            store_file_dir_path.to_string_lossy(),
+                            e.description()
+                        );
+                        print_err(&err_msg[..])
+                    }
+                }
+            }
+            Path::new(&store_file_dir_path).join("kv.json")
+        }
+        None => {
+            print_err("Error! Cannot find the config directory!");
+        }
     }
 }
 
@@ -175,10 +198,11 @@ fn main() {
         .author("David B")
         .about("Simple key, value storage")
         .setting(AppSettings::SubcommandRequiredElseHelp)
-        .about("Get key from storage")
+        .about("Key-Value Storage with bash command hooks. Run hooks after setting keys, etc.")
         .subcommand(
             SubCommand::with_name("cmd")
-                .about("Add, Run, and hook commands")
+                .setting(AppSettings::SubcommandRequiredElseHelp)
+                .about("Add, and Run bash commands. Add hooks to run them on variable update.")
                 .subcommand(
                     SubCommand::with_name("run")
                         .about("Run commands <cmd-name>")
@@ -192,7 +216,7 @@ fn main() {
                 )
             .subcommand(
                 SubCommand::with_name("add-hook")
-                    .about("Add hook with name <hook-name> to run <cmd-name> when [key] are --<trigger>=<get,set,del>")
+                    .about("Add hook with name <hook-name> to run <cmd-name> when [key] is updated (kv get, kv set, kv del)")
                     .arg(Arg::with_name("hook-name").takes_value(true).required(true))
                     .arg(Arg::with_name("cmd-name").takes_value(true).required(true))
                     .arg(Arg::with_name("trigger").takes_value(false).required(true).possible_values(&["get", "set", "del"]))
