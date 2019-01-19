@@ -1,10 +1,14 @@
 #[macro_use]
 extern crate clap;
 extern crate dirs;
+#[macro_use]
+extern crate human_panic;
 extern crate serde_json;
+extern crate tabwriter;
 #[macro_use]
 extern crate serde_derive;
-use clap::{App, AppSettings, Arg, SubCommand};
+
+use clap::{App, AppSettings, Arg, ArgMatches, SubCommand};
 use std::collections::HashMap;
 use std::env;
 use std::error::Error;
@@ -14,6 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::str::FromStr;
+use tabwriter::TabWriter;
 
 type KV = HashMap<String, String>;
 
@@ -109,6 +114,7 @@ fn write_file(m: &KVStore) {
     file.write_all(s.as_bytes()).unwrap();
 }
 
+/// Lets you run a command
 fn run_command(cmd_name: &str, cmd: &str) {
     let shell = match env::var("SHELL") {
         Ok(s) => s,
@@ -138,6 +144,7 @@ fn run_hooks(key_name: &str, current_op: &OpType) {
     }
 }
 
+/// Get the store as KVStore
 fn get_store() -> KVStore {
     match serde_json::from_reader(get_file()) {
         Ok(s) => s,
@@ -198,13 +205,137 @@ fn print_res(s: Option<String>) {
     }
 }
 
+fn print_aligned(v: Vec<String>) {
+    let mut t = TabWriter::new(vec![]);
+    write!(&mut t, "{}", v.join("\n")).unwrap();
+    t.flush().unwrap();
+    println!("{}", String::from_utf8(t.into_inner().unwrap()).unwrap());
+}
+
 fn print_err(s: &str) -> ! {
     println!("{}", s);
     std::process::exit(1);
 }
 
+fn run(matches: ArgMatches) {
+    let mut kvstore = get_store();
+    if let Some(get) = matches.subcommand_matches("get") {
+        let key = get.value_of("key").unwrap();
+        let value = get_key(key, &kvstore.kvs);
+        print_res(value);
+        run_hooks(key, &OpType::Get);
+    }
+    if let Some(set) = matches.subcommand_matches("set") {
+        let key = set.value_of("key").unwrap();
+        let value = set.value_of("val").unwrap();
+        set_key(key, value, &mut kvstore.kvs);
+        write_file(&kvstore);
+        run_hooks(key, &OpType::Set);
+    }
+    if let Some(del) = matches.subcommand_matches("del") {
+        let key = del.value_of("key").unwrap();
+        let value = del_key(key, &mut kvstore.kvs);
+        write_file(&kvstore);
+        print_res(value);
+        run_hooks(key, &OpType::Del);
+    }
+    if let Some(to_list) = matches.subcommand_matches("list") {
+        let key = to_list.value_of("to-list");
+        let kvstore = get_store();
+        let print_cmds = |kvstore: &KVStore| {
+            let mut start = vec!["Key\t--\tValue".to_owned()];
+            let mut to_print = kvstore
+                .cmds
+                .iter()
+                .map(|(key, val)| format!("{}\t--\t{}", key, val))
+                .collect::<Vec<String>>();
+            start.append(&mut to_print);
+            print_aligned(start);
+        };
+        let print_keys = |kvstore: &KVStore| {
+            let mut start = vec!["Key\t--\tValue".to_owned()];
+            let mut to_print = kvstore
+                .kvs
+                .iter()
+                .map(|(key, val)| format!("{}\t--\t{}", key, val))
+                .collect::<Vec<String>>();
+            start.append(&mut to_print);
+            print_aligned(start);
+        };
+        let print_hooks = |kvstore: &KVStore| {
+            let mut start = vec!["Hook Name\t--\tCmd Name\t--\tTrigger\t--\tKey".to_owned()];
+            let mut to_print = kvstore
+                .hooks
+                .iter()
+                .map(|hook| {
+                    format!(
+                        "{}\t--\t{}\t--\t{}\t--\t{}",
+                        hook.name, hook.cmd_name, hook.run_on, hook.key
+                    )
+                })
+                .collect::<Vec<String>>();
+            start.append(&mut to_print);
+            print_aligned(start);
+        };
+        match key {
+            Some("cmds") => {
+                print_cmds(&kvstore);
+            }
+            Some("keys") => {
+                print_keys(&kvstore);
+            }
+            Some("hooks") => {
+                print_hooks(&kvstore);
+            }
+            None => {
+                print_keys(&kvstore);
+                println!("-------------------");
+                print_cmds(&kvstore);
+                println!("-------------------");
+                print_hooks(&kvstore);
+            }
+            _ => print_err("Error! Unknown subject to list!"),
+        }
+    }
+
+    if let Some(cmd) = matches.subcommand_matches("cmd") {
+        if let Some(m_run) = cmd.subcommand_matches("run") {
+            let cmd_name = m_run.value_of("cmd-name").unwrap();
+            let cmd_value = get_key(cmd_name, &kvstore.cmds);
+            match cmd_value {
+                Some(v) => run_command(cmd_name, &v),
+                None => println!("Error! Command {} does not exist!", cmd_name),
+            }
+        }
+        if let Some(m_add) = cmd.subcommand_matches("add") {
+            let cmd_name = m_add.value_of("cmd-name").unwrap();
+            let cmd_value = m_add.value_of("cmd-value").unwrap();
+            set_key(cmd_name, cmd_value, &mut kvstore.cmds);
+            write_file(&kvstore);
+        }
+        if let Some(m_del_hook) = cmd.subcommand_matches("del-hook") {
+            let hook_name = m_del_hook.value_of("hook-name").unwrap();
+            rm_hook(hook_name);
+        }
+
+        if let Some(m_add_hook) = cmd.subcommand_matches("add-hook") {
+            let hook_name = m_add_hook.value_of("hook-name").unwrap();
+            let cmd_name = m_add_hook.value_of("cmd-name").unwrap();
+            let trigger_op = value_t!(m_add_hook, "trigger", OpType).unwrap();
+            let key = m_add_hook.value_of("key").unwrap();
+            add_hook(
+                hook_name.to_owned(),
+                cmd_name.to_owned(),
+                trigger_op,
+                key.to_owned(),
+            )
+        }
+    }
+}
+
 /// Fooar
 fn main() {
+    setup_panic!();
     let matches = App::new("kv")
         .version("0.2")
         .author("David Briggs (dpbriggs@edu.uwaterloo.ca)")
@@ -215,7 +346,7 @@ fn main() {
                     .about("List keys, cmds, or hooks.")
                     .arg(Arg::with_name("to-list")
                          .takes_value(true)
-                         .required(true)
+                         .required(false)
                     .possible_values(&["keys", "cmds", "hooks"])))
         .subcommand(
             SubCommand::with_name("cmd")
@@ -318,86 +449,5 @@ my-key-value
                 ),
         )
         .get_matches();
-    let mut kvstore = get_store();
-    if let Some(get) = matches.subcommand_matches("get") {
-        let key = get.value_of("key").unwrap();
-        let value = get_key(key, &kvstore.kvs);
-        print_res(value);
-        run_hooks(key, &OpType::Get);
-    }
-    if let Some(set) = matches.subcommand_matches("set") {
-        let key = set.value_of("key").unwrap();
-        let value = set.value_of("val").unwrap();
-        set_key(key, value, &mut kvstore.kvs);
-        write_file(&kvstore);
-        run_hooks(key, &OpType::Set);
-    }
-    if let Some(del) = matches.subcommand_matches("del") {
-        let key = del.value_of("key").unwrap();
-        let value = del_key(key, &mut kvstore.kvs);
-        write_file(&kvstore);
-        print_res(value);
-        run_hooks(key, &OpType::Del);
-    }
-    if let Some(to_list) = matches.subcommand_matches("list") {
-        let key = to_list.value_of("to-list").unwrap();
-        let kvstore = get_store();
-        match key {
-            "cmds" => {
-                for (key, val) in kvstore.cmds.iter() {
-                    println!("{} -- {}", key, val);
-                }
-            }
-            "keys" => {
-                println!("Key -- Value");
-                for (key, val) in kvstore.kvs.iter() {
-                    println!("{} -- {}", key, val);
-                }
-            }
-            "hooks" => {
-                println!("Hook Name -- Cmd Name -- Trigger -- Key");
-                for hook in kvstore.hooks {
-                    println!(
-                        "{} -- {} -- {} -- {}",
-                        hook.name, hook.cmd_name, hook.run_on, hook.key
-                    );
-                }
-            }
-            _ => print_err("Error! Unknown subject to list!"),
-        }
-    }
-
-    if let Some(cmd) = matches.subcommand_matches("cmd") {
-        if let Some(m_run) = cmd.subcommand_matches("run") {
-            let cmd_name = m_run.value_of("cmd-name").unwrap();
-            let cmd_value = get_key(cmd_name, &kvstore.cmds);
-            match cmd_value {
-                Some(v) => run_command(cmd_name, &v),
-                None => println!("Error! Command {} does not exist!", cmd_name),
-            }
-        }
-        if let Some(m_add) = cmd.subcommand_matches("add") {
-            let cmd_name = m_add.value_of("cmd-name").unwrap();
-            let cmd_value = m_add.value_of("cmd-value").unwrap();
-            set_key(cmd_name, cmd_value, &mut kvstore.cmds);
-            write_file(&kvstore);
-        }
-        if let Some(m_del_hook) = cmd.subcommand_matches("del-hook") {
-            let hook_name = m_del_hook.value_of("hook-name").unwrap();
-            rm_hook(hook_name);
-        }
-
-        if let Some(m_add_hook) = cmd.subcommand_matches("add-hook") {
-            let hook_name = m_add_hook.value_of("hook-name").unwrap();
-            let cmd_name = m_add_hook.value_of("cmd-name").unwrap();
-            let trigger_op = value_t!(m_add_hook, "trigger", OpType).unwrap();
-            let key = m_add_hook.value_of("key").unwrap();
-            add_hook(
-                hook_name.to_owned(),
-                cmd_name.to_owned(),
-                trigger_op,
-                key.to_owned(),
-            )
-        }
-    }
+    run(matches);
 }
