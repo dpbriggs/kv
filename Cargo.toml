@@ -5,7 +5,7 @@ authors = ["David Briggs <email@dpbriggs.ca>"]
 edition = "2018"
 
 [dependencies]
-serde = "0.8"
+serde = "1.0"
 serde_derive = "0.8"
 serde_json = "0.8"
 dirs = "1.0.4"
